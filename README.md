@@ -2,7 +2,7 @@
 
 htop for an iPhone plugged into your computer. Live CPU, memory, FPS, GPU and per-process network, from Linux, Windows or macOS. No Xcode.
 
-![iphone-top showing an iPhone X: CPU and per-core meters, memory split, FPS and GPU, and a process table sorted by CPU](docs/demo.gif)
+![iphone-top showing an iPhone X: CPU and per-core meters, memory split, FPS and GPU, and a process table sorted by CPU](https://raw.githubusercontent.com/Cassian433/iphone-top/main/docs/demo.gif)
 
 <sub>An iPhone X on iOS 16.7.16 sitting on a desk, recorded with `--json` and replayed with only Apple's own processes kept. FPS reads 0 because nothing on screen was moving.</sub>
 

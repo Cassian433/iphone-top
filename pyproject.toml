@@ -63,3 +63,7 @@ typeCheckingMode = "standard"
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+
+[tool.hatch.build.targets.sdist]
+# The demo GIF is for the GitHub page, not the package.
+exclude = ["/docs", "/.gitignore"]
