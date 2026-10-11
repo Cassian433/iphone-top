@@ -1,0 +1,64 @@
+[project]
+name = "iphone-top"
+version = "0.1.0"
+description = "htop for your iPhone: live CPU, memory, FPS and per-process network from a USB-connected device"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Cassian433" }]
+requires-python = ">=3.10"
+keywords = ["ios", "iphone", "htop", "top", "monitoring", "performance", "tui", "pymobiledevice3", "instruments"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Software Development :: Testing",
+    "Topic :: System :: Monitoring",
+]
+dependencies = [
+    # 11.21.0 is the first release with NetworkStatistics (per-process network counters).
+    "pymobiledevice3>=11.21.0",
+    "textual>=1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Cassian433/iphone-top"
+Issues = "https://github.com/Cassian433/iphone-top/issues"
+
+[project.scripts]
+iphone-top = "iphone_top.cli:main"
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.390",
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "PTH", "ASYNC"]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+include = ["src", "tests"]
+pythonVersion = "3.10"
+typeCheckingMode = "standard"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
