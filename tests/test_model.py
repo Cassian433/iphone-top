@@ -69,6 +69,7 @@ def test_memory_uses_16k_pages(sysmontap: dict[str, Any]) -> None:
     assert memory.cached == (values["vmExtPageCount"] + values["vmPurgeableCount"]) * PAGE_SIZE
     assert memory.used + memory.cached + memory.free == memory.total
     assert parse_memory({"physMemSize": 1}) is None
+    assert parse_memory({**values, "physMemSize": 0}) is None
 
 
 def test_processes_first_snapshot_has_no_cpu(sysmontap: dict[str, Any]) -> None:

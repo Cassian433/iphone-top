@@ -153,6 +153,8 @@ def parse_memory(system: Mapping[str, Any], page_size: int = PAGE_SIZE) -> Memor
         external = int(system["vmExtPageCount"])
     except (KeyError, TypeError, ValueError):
         return None
+    if total <= 0:
+        return None
     app = max(internal - purgeable, 0) * page_size
     cached = (external + purgeable) * page_size
     used = app + wired + compressed

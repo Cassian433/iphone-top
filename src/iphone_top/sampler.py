@@ -7,10 +7,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import datetime
 import json
 import logging
 import time
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncGenerator, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -66,7 +67,7 @@ class LiveSampler:
         self._unlisted: set[int] = set()
         self._names_stale = False
 
-    async def stream(self) -> AsyncIterator[Event]:
+    async def stream(self) -> AsyncGenerator[Event, None]:
         async with contextlib.AsyncExitStack() as stack:
             try:
                 dvt = await stack.enter_async_context(DvtProvider(self.connection.dvt))
@@ -93,8 +94,10 @@ class LiveSampler:
                 tasks.append(asyncio.create_task(self._network_loop(dvt)))
             try:
                 sysmon = Sysmontap(dvt, process_attributes, system_attributes, interval_ms=self.interval_ms)
-                async for sample in self._sysmon_samples(sysmon, ticks_to_seconds):
-                    yield sample
+                # Closed explicitly so sysmontap's stop goes out before the DVT connection closes.
+                async with contextlib.aclosing(self._sysmon_samples(sysmon, ticks_to_seconds)) as samples:
+                    async for sample in samples:
+                        yield sample
             finally:
                 for task in tasks:
                     task.cancel()
@@ -106,8 +109,8 @@ class LiveSampler:
         boot_time = None
         launchd = next((p for p in processes if p.get("pid") == 1), None)
         start = launchd.get("startDate") if launchd else None
-        if hasattr(start, "timestamp"):
-            boot_time = start.timestamp()  # pyright: ignore[reportOptionalMemberAccess]
+        if isinstance(start, datetime.datetime):
+            boot_time = start.timestamp()
         return DeviceHeader(
             name=str(values.get("DeviceName") or "iPhone"),
             model=model_name(product_type) if product_type else "iPhone",
@@ -117,7 +120,7 @@ class LiveSampler:
             boot_time=boot_time,
         )
 
-    async def _sysmon_samples(self, sysmon: Sysmontap, ticks_to_seconds: float | None) -> AsyncIterator[Sample]:
+    async def _sysmon_samples(self, sysmon: Sysmontap, ticks_to_seconds: float | None) -> AsyncGenerator[Sample, None]:
         # sysmontap pushes two rows per interval: system-wide counters, then the process list.
         process_attributes: list[str] = list(sysmon.process_attributes_cls.__dataclass_fields__)
         system_attributes: list[str] = list(sysmon.system_attributes_cls.__dataclass_fields__)
@@ -279,7 +282,7 @@ async def _timebase(info: DeviceInfo) -> float | None:
         return None
 
 
-async def replay_stream(path: Path, speed: float = 1.0) -> AsyncIterator[Event]:
+async def replay_stream(path: Path, speed: float = 1.0) -> AsyncGenerator[Event, None]:
     """Play back an ``iphone-top --json`` recording at its recorded pace."""
     header: DeviceHeader | None = None
     previous: float | None = None
