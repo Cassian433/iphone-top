@@ -73,7 +73,7 @@ class ProcessStats:
     """Bytes per second received; None until two network samples have been seen."""
     tx_rate: float | None = None
     app: bool = False
-    """An app or app extension, as opposed to a daemon."""
+    """iOS lists it as an application (apps, plus some of their extensions), not a daemon."""
 
 
 @dataclass
@@ -228,8 +228,9 @@ class NetworkRates:
     """Per-PID rx/tx rates from NetworkStatistics replies.
 
     Each record carries lifetime byte totals (``net.rx.bytes``/``net.tx.bytes``) and the device's
-    sample ``time``. Rates come from consecutive totals. The ``.delta`` fields are not used: right
-    after sampling starts they equal the lifetime total, which would read as one huge spike.
+    sample ``time``. Rates come from consecutive totals. The ``.delta`` fields don't track them:
+    on an iPhone X they were often 0 while the totals grew, and in the first reply after sampling
+    started they equalled the lifetime total.
     """
 
     def __init__(self) -> None:

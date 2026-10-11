@@ -978,7 +978,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "pymobiledevice3", specifier = ">=11.22.0" },
+    { name = "pymobiledevice3", specifier = ">=11.21.0,<12" },
     { name = "textual", specifier = ">=1.0" },
 ]
 

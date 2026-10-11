@@ -25,7 +25,8 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=(
             "iOS 16 and older need Developer Mode on and the Developer Disk Image mounted "
             "(pymobiledevice3 mounter auto-mount). iOS 17.4+ opens a no-root tunnel by itself; "
-            "iOS 17.0-17.3 on Linux/Windows needs `sudo pymobiledevice3 remote tunneld` and --tunnel ''."
+            "iOS 17.0-17.3 on Linux/Windows needs `pymobiledevice3 remote tunneld` running as root/admin, "
+            "then iphone-top --tunnel."
         ),
     )
     parser.add_argument(
@@ -51,7 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         const="",
         metavar="UDID",
-        help="iOS 17+: use a device from a running `pymobiledevice3 remote tunneld` ('' = the only one)",
+        help="iOS 17+: use a device from a running `pymobiledevice3 remote tunneld` (no UDID = the only one)",
     )
     parser.add_argument(
         "-i", "--interval", type=int, default=1000, metavar="MS", help="sampling interval in ms (default 1000)"

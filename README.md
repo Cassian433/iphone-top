@@ -29,9 +29,9 @@ iphone-top --json -n 60 > run.ndjson && iphone-top --replay run.ndjson
 | `q` | quit |
 | `s` | cycle the sort: CPU, memory, RX, TX, PID, name |
 | `/` | filter by name or PID (Enter keeps it, Esc clears it) |
-| `a` | apps and app extensions only |
+| `a` | only what iOS lists as apps |
 | `p` | pause the display (sampling keeps going) |
-| arrows, PgUp/PgDn | move; the highlight follows the process you picked |
+| arrows, PgUp/PgDn | move; the highlight follows the process you picked, and back on the top row it follows whatever is on top |
 
 The top half:
 
@@ -45,9 +45,9 @@ The table:
 - **CPU%** is percent of one core, as in `top`, so a busy multithreaded process can go past 100.
 - **MEM** is the physical footprint, the number Xcode's memory gauge and the jetsam killer look at.
 - **RX/s** and **TX/s** are bytes per second for that process. `·` means idle, `-` means not measured yet (the first two seconds, or a process that just started).
-- App and app extension names are bold. `DTServiceHub` and `sysmond` are marked `(sampling)`: that's the device side of iphone-top.
+- Names iOS lists as apps are bold (apps, plus some of their extensions). `DTServiceHub` and `sysmond` are marked `(sampling)`: that's the device side of iphone-top.
 
-Run `iphone-top --help` for the rest: `--interval MS` (default 1000), `--no-net`, `--count N`, `--speed` for replays.
+Run `iphone-top --help` for the rest: `--interval MS` (default 1000), `--no-net`, `--count N`, `--speed` for replays, `--usbmux` for a non-default usbmuxd.
 
 ## JSON
 
@@ -84,13 +84,17 @@ A file written with `--json` plays back in the TUI with `--replay`.
 - **iOS 17 and newer:** Apple moved the instruments services behind a RemoteXPC tunnel. On 17.4+ iphone-top opens pymobiledevice3's no-root userspace tunnel by itself. On 17.0-17.3 under Linux or Windows, start a tunnel first and point iphone-top at it:
 
   ```sh
-  sudo pymobiledevice3 remote tunneld
-  iphone-top --tunnel ''
+  sudo pymobiledevice3 remote tunneld    # Windows: an administrator prompt, no sudo
+  iphone-top --tunnel
   ```
 
   `--rsd HOST PORT` takes the address printed by `pymobiledevice3 remote start-tunnel`. The Developer Disk Image still needs `pymobiledevice3 mounter auto-mount`.
 
-  **I haven't tested iOS 17 or later.** My phones are on iOS 16. The 17+ path uses the same pymobiledevice3 calls its own CLI uses, but until someone runs it, treat it as untested. Issues with the output of `iphone-top --json -n 3` are very welcome.
+  **I haven't tested iOS 17 or later.** My phones are on iOS 16. The 17+ path uses the same pymobiledevice3 calls its own CLI uses, but until someone runs it, treat it as untested. A report in an issue would help a lot. This prints three samples without your device's name or its process list:
+
+  ```sh
+  iphone-top --json -n 3 | jq -c 'del(.name) | if .type == "sample" then .processes |= length else . end'
+  ```
 
 ## How it works
 
@@ -98,7 +102,7 @@ Everything comes from the services Xcode's Instruments uses, reached through [py
 
 - **sysmontap**: per-core CPU load, VM page counts, disk counters, and per-process CPU, footprint and thread count. iphone-top asks for six process attributes instead of the ~74 available. One of them is `procAge`, because sysmontap leaves out any process whose requested values didn't change, and without an attribute that always changes the idle processes vanish from the list.
 - **graphics.opengl**: `CoreAnimationFramesPerSecond` and `Device Utilization %`, about once a second.
-- **NetworkStatistics** (Xcode's network gauge): lifetime byte counters per PID. Rates come from consecutive totals. The provider's own `.delta` fields stay at 0 most of the time even while the totals grow.
+- **NetworkStatistics** (Xcode's network gauge): lifetime byte counters per PID. Rates come from consecutive totals. The provider's own `.delta` fields don't track them: they were often 0 while the totals grew.
 - **runningProcesses**: full names (sysmontap cuts them at 31 characters), which processes are apps, and launchd's start date for the uptime.
 - **lockdown and the diagnostics relay**: battery level, charging state and battery temperature, every 30 seconds.
 
@@ -114,7 +118,7 @@ I added the per-process NetworkStatistics ([#1998](https://github.com/doronz88/p
 - **Untested:** iOS 17+, devices over Wi-Fi, iPads, macOS and Windows hosts. Tested on Linux (Ubuntu, Python 3.10 and 3.14) with an iPhone X on iOS 16.7.16 over USB.
 - It only reads. It never launches, kills or signals processes, changes settings, or mounts images.
 
-If something fails in a way the message doesn't explain, run with `IPHONE_TOP_DEBUG=/tmp/iphone-top.log` and attach the log to an issue.
+If something fails in a way the message doesn't explain, run with `IPHONE_TOP_DEBUG=/tmp/iphone-top.log`. The log holds pymobiledevice3's debug output, which includes your device's name and UDID, so look through it before attaching it to an issue.
 
 ## Development
 

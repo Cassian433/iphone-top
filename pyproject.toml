@@ -21,8 +21,9 @@ classifiers = [
     "Topic :: System :: Monitoring",
 ]
 dependencies = [
-    # 11.21.0 is the first release with NetworkStatistics (per-process network counters).
-    "pymobiledevice3>=11.21.0",
+    # 11.21.0 is the first release with NetworkStatistics (per-process network counters). Major
+    # releases have changed the service API before, so the next one has to be tried first.
+    "pymobiledevice3>=11.21.0,<12",
     "textual>=1.0",
 ]
 
