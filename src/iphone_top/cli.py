@@ -70,6 +70,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.interval < 100:
         print("iphone-top: --interval must be at least 100 ms", file=sys.stderr)
         return 2
+    if args.speed <= 0:
+        print("iphone-top: --speed must be greater than 0", file=sys.stderr)
+        return 2
     _quiet_logging()
     try:
         return asyncio.run(_run(args))
@@ -140,13 +143,23 @@ async def _print_json(events: AsyncGenerator[object, None], count: int | None) -
 
 
 def _quiet_logging() -> None:
-    # pymobiledevice3 logs failures (with tracebacks) through logging; on a TUI that paints over the
-    # screen, and the errors that matter are explained in plain words anyway.
+    """Keep log output off the terminal; IPHONE_TOP_DEBUG=FILE sends everything to FILE instead.
+
+    pymobiledevice3 logs failures (with tracebacks) through logging. On a TUI that paints over the
+    screen, and the errors that matter are explained in plain words anyway.
+    """
+    debug_log = os.environ.get("IPHONE_TOP_DEBUG")
+    if debug_log:
+        logging.basicConfig(
+            filename=debug_log,
+            level=logging.DEBUG,
+            format="%(asctime)s %(name)s %(levelname)s %(message)s",
+            force=True,
+        )
+        logging.getLogger("pymobiledevice3").setLevel(logging.NOTSET)
+        return
     logging.getLogger().addHandler(logging.NullHandler())
-    level = logging.DEBUG if os.environ.get("IPHONE_TOP_DEBUG") else logging.CRITICAL
-    logging.getLogger("pymobiledevice3").setLevel(level)
-    if os.environ.get("IPHONE_TOP_DEBUG"):
-        logging.basicConfig(filename=os.environ["IPHONE_TOP_DEBUG"], level=logging.DEBUG)
+    logging.getLogger("pymobiledevice3").setLevel(logging.CRITICAL)
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ import dataclasses
 import datetime
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypeVar
 
 # arm64 iOS uses 16 KiB VM pages; sysmontap reports memory as page counts. An iPhone X reports
 # physMemSize=180756, which is 2.76 GiB at 16 KiB and only 706 MiB at 4 KiB.
@@ -109,6 +109,9 @@ class Sample:
     """GPU device utilization percent."""
     battery: Battery | None = None
     processes: list[ProcessStats] = field(default_factory=list)
+
+
+_Record = TypeVar("_Record", CpuStats, MemoryStats, ProcessStats, Battery, DeviceHeader)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -309,25 +312,30 @@ def header_to_dict(header: DeviceHeader) -> dict[str, Any]:
 
 
 def sample_from_dict(data: Mapping[str, Any]) -> Sample:
+    """Rebuild a sample; keys this version doesn't know (from a newer recording) are ignored."""
     cpu = data.get("cpu")
     memory = data.get("memory")
     battery = data.get("battery")
     return Sample(
         time=float(data["time"]),
-        cpu=CpuStats(**cpu) if cpu else None,
-        memory=MemoryStats(**memory) if memory else None,
+        cpu=_known(CpuStats, cpu) if cpu else None,
+        memory=_known(MemoryStats, memory) if memory else None,
         disk_read_rate=data.get("disk_read_rate"),
         disk_write_rate=data.get("disk_write_rate"),
         fps=data.get("fps"),
         gpu=data.get("gpu"),
-        battery=Battery(**battery) if battery else None,
-        processes=[ProcessStats(**p) for p in data.get("processes") or []],
+        battery=_known(Battery, battery) if battery else None,
+        processes=[_known(ProcessStats, p) for p in data.get("processes") or []],
     )
 
 
 def header_from_dict(data: Mapping[str, Any]) -> DeviceHeader:
-    fields = {f.name for f in dataclasses.fields(DeviceHeader)}
-    return DeviceHeader(**{k: v for k, v in data.items() if k in fields})
+    return _known(DeviceHeader, data)
+
+
+def _known(cls: type[_Record], data: Mapping[str, Any]) -> _Record:
+    names = {f.name for f in dataclasses.fields(cls)}
+    return cls(**{k: v for k, v in data.items() if k in names})
 
 
 # ---------------------------------------------------------------------------------------------

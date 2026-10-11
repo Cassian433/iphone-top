@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import contextlib
+import json
+import os
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
@@ -34,6 +36,7 @@ from pymobiledevice3.lockdown_service_provider import LockdownServiceProvider
 from pymobiledevice3.remote.remote_service_discovery import RemoteServiceDiscoveryService
 
 PMD3 = "pymobiledevice3"
+TUNNELD_COMMAND = f"sudo {PMD3} remote tunneld   (Windows: run it from an administrator prompt, without sudo)"
 
 
 class UserFacingError(Exception):
@@ -87,14 +90,18 @@ async def connect(
             # Imported lazily: it pulls in the userspace network stack, which iOS 16 never needs.
             from pymobiledevice3.remote.rsd_tunnel import PreferredRsdTunnel
 
+            if usbmux:
+                # PreferredRsdTunnel has no usbmux parameter; pymobiledevice3's socket layer reads this.
+                os.environ["USBMUXD_SOCKET_ADDRESS"] = usbmux
+
             try:
                 async with PreferredRsdTunnel(serial=lockdown.udid) as service:
                     yield Connection(lockdown, service, "userspace tunnel")
             except UserspaceTunnelUnavailableError as e:
                 raise UserFacingError(
                     f"iOS {lockdown.product_version} needs a tunnel iphone-top can't open on this host by itself.\n"
-                    f"Start one in another terminal:  sudo {PMD3} remote tunneld\n"
-                    "then run:                       iphone-top --tunnel ''"
+                    f"Start one in another terminal:  {TUNNELD_COMMAND}\n"
+                    "then run:                       iphone-top --tunnel"
                 ) from e
         else:
             yield Connection(lockdown, lockdown, "usbmux")
@@ -103,10 +110,13 @@ async def connect(
 
 
 async def _only_usb_device(address: str | None) -> str | None:
-    """The UDID of the single USB device, None if there is none (create_using_usbmux then explains)."""
+    """The UDID of the only USB device; with none or several, an error that says so."""
     devices = await usbmux.select_devices_by_connection_type(connection_type="USB", usbmux_address=address)
-    if len(devices) <= 1:
-        return devices[0].serial if devices else None
+    if not devices:
+        # Without this, create_using_usbmux(serial=None) would take a Wi-Fi device instead.
+        raise NoDeviceConnectedError()
+    if len(devices) == 1:
+        return devices[0].serial
     listing = "\n".join(f"  {device.serial}" for device in devices)
     raise UserFacingError(
         f"{len(devices)} devices are connected over USB. Pick one with --udid (or PYMOBILEDEVICE3_UDID):\n{listing}"
@@ -195,9 +205,13 @@ def explain(error: BaseException) -> str | None:
     if isinstance(error, DeveloperModeIsNotEnabledError):
         return developer_mode_message()
     if isinstance(error, TunneldConnectionError):
-        return f"No tunneld is running. Start one with:  sudo {PMD3} remote tunneld"
+        return f"No tunneld is running. Start one with:  {TUNNELD_COMMAND}"
     if isinstance(error, ConnectionTerminatedError):
         return "Lost the connection to the phone (unplugged, or it went to sleep on a flaky cable)."
+    if isinstance(error, FileNotFoundError):
+        return f"No such file: {error.filename}"
+    if isinstance(error, json.JSONDecodeError):
+        return f"That file isn't an iphone-top --json recording (line {error.lineno}: {error.msg})."
     if isinstance(error, ConnectionRefusedError):
         return f"Connection refused: {error}. Is the --rsd address from a running tunnel?"
     return None

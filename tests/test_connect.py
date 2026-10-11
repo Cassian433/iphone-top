@@ -117,3 +117,31 @@ async def test_diagnose_falls_back_to_a_generic_hint(mounter: type[FakeMounter])
     message = await diagnose_dvt_failure(FakeLockdown("15.8", developer_mode=True))  # type: ignore[arg-type]
     assert "refused" in message
     assert "mounter auto-mount" in message
+
+
+async def test_no_usb_device_is_an_error_not_a_wifi_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def none_attached(**kwargs: Any) -> list[Any]:
+        return []
+
+    monkeypatch.setattr(connect.usbmux, "select_devices_by_connection_type", none_attached)
+    with pytest.raises(NoDeviceConnectedError):
+        await connect._only_usb_device(None)
+
+
+async def test_several_usb_devices_must_be_picked(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Device:
+        def __init__(self, serial: str) -> None:
+            self.serial = serial
+
+    async def two(**kwargs: Any) -> list[Any]:
+        return [Device("aaa"), Device("bbb")]
+
+    monkeypatch.setattr(connect.usbmux, "select_devices_by_connection_type", two)
+    with pytest.raises(UserFacingError, match="2 devices are connected") as raised:
+        await connect._only_usb_device(None)
+    assert "aaa" in str(raised.value) and "bbb" in str(raised.value)
+
+
+def test_tunneld_hint_works_on_windows_too() -> None:
+    message = explain(TunneldConnectionError()) or ""
+    assert "administrator" in message
