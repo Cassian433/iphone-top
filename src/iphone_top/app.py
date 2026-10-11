@@ -2,25 +2,30 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import time
 from collections import deque
-from collections.abc import AsyncGenerator
-from typing import ClassVar
+from collections.abc import AsyncGenerator, Sequence
+from typing import Any, ClassVar
 
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical
+from textual.coordinate import Coordinate
 from textual.widget import Widget
 from textual.widgets import DataTable, Digits, Footer, Input
+from textual.worker import Worker, WorkerCancelled, WorkerError, WorkerFailed
 
 from iphone_top import render
 from iphone_top.model import SORT_KEYS, DeviceHeader, Sample, filter_processes, sort_processes
 
 HISTORY = 120
+# (column key, sort key it shows a marker for)
 COLUMNS = (("PID", "pid"), ("CPU%", "cpu"), ("MEM", "memory"), ("THR", None), ("RX/s", "rx"), ("TX/s", "tx"))
 SORT_LABELS = {"cpu": "CPU", "memory": "memory", "rx": "RX", "tx": "TX", "pid": "PID", "name": "name"}
+CLOSE_TIMEOUT_SECONDS = 10
 
 
 class Panel(Widget):
@@ -34,6 +39,76 @@ class Panel(Widget):
 
     def render(self) -> Text:
         return self._draw(self.size.width)
+
+
+class ProcessTable(DataTable[Text]):
+    """The process list, updated in place so the cursor and scroll position survive each sample.
+
+    ``clear()`` would reset both every second. The highlight stays on the top row until the user
+    moves it; then it follows the process they picked through re-sorts until it exits. Moving back
+    to the top row hands the highlight back to whatever is busiest.
+    """
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(cursor_type="row", zebra_stripes=False, **kwargs)
+        self.picked: str | None = None
+        self._cells: dict[str, tuple[Text, ...]] = {}
+        self._updating = False
+
+    def set_columns(self, sort_key: str) -> None:
+        if not self.columns:
+            # Widths are measured from the first label, so it already holds the marker slot.
+            for label, _ in COLUMNS:
+                self.add_column(Text(f"{label} ", justify="right"), key=label)
+            self.add_column("NAME ", key="NAME")
+        # The marker slot is always there, so the columns don't shift when the sort changes.
+        for label, key in COLUMNS:
+            self.columns[self._column_key(label)].label = Text(
+                f"{label}{'▼' if key == sort_key else ' '}", justify="right"
+            )
+        self.columns[self._column_key("NAME")].label = Text(f"NAME{'▲' if sort_key == 'name' else ' '}")
+
+    def _column_key(self, name: str) -> Any:
+        return next(key for key in self.columns if key.value == name)
+
+    def watch_cursor_coordinate(self, old_coordinate: Coordinate, new_coordinate: Coordinate) -> None:
+        super().watch_cursor_coordinate(old_coordinate, new_coordinate)
+        if self._updating or not self.row_count:
+            return
+        if new_coordinate.row == 0:
+            self.picked = None
+            return
+        with contextlib.suppress(Exception):
+            self.picked = self.coordinate_to_cell_key(new_coordinate).row_key.value
+
+    def show(self, rows: Sequence[tuple[str, tuple[Text, ...]]], alive: set[str]) -> None:
+        """Make the table show ``rows`` in this order; ``alive`` is every pid in the sample."""
+        self._updating = True
+        try:
+            wanted = dict(rows)
+            for key in [key for key in self._cells if key not in wanted]:
+                self.remove_row(key)
+                del self._cells[key]
+            column_keys = list(self.columns)
+            for key, cells in rows:
+                before = self._cells.get(key)
+                if before is None:
+                    self.add_row(*cells, key=key)
+                elif before != cells:
+                    for column, old, new in zip(column_keys, before, cells, strict=True):
+                        if old != new:
+                            self.update_cell(key, column, new, update_width=True)
+                self._cells[key] = cells
+            rank = {key: index for index, (key, _) in enumerate(rows)}
+            self.sort(self._column_key("PID"), key=lambda pid: rank[pid.plain])
+            if self.picked is not None and self.picked not in alive:
+                self.picked = None  # the process exited
+            if self.picked is not None and self.picked in wanted:
+                self.move_cursor(row=self.get_row_index(self.picked), animate=False)
+            elif self.picked is None and self.row_count:
+                self.move_cursor(row=0, animate=False, scroll=False)
+        finally:
+            self._updating = False
 
 
 class IPhoneTop(App[None]):
@@ -80,6 +155,18 @@ class IPhoneTop(App[None]):
         self.finished = False
         self.cpu_history: deque[float] = deque(maxlen=HISTORY)
         self.fps_history: deque[float] = deque(maxlen=HISTORY)
+        self.consumer: Worker[None] | None = None
+
+    async def run_until_closed(self, headless: bool = False) -> None:
+        """Run the UI, then let the sample stream finish closing before the caller drops the connection.
+
+        Textual cancels workers on exit without waiting for them, so the stream's cleanup (stopping
+        the DVT channels) would otherwise race the transport being closed underneath it.
+        """
+        await self.run_async(headless=headless)
+        if self.consumer is not None:
+            with contextlib.suppress(WorkerCancelled, WorkerFailed, WorkerError, asyncio.TimeoutError):
+                await asyncio.wait_for(self.consumer.wait(), CLOSE_TIMEOUT_SECONDS)
 
     # -- layout ---------------------------------------------------------------------------------
 
@@ -96,16 +183,16 @@ class IPhoneTop(App[None]):
                 yield Digits("--", id="fps")
                 yield Panel(lambda width: render.gpu_meter(self.shown.gpu if self.shown else None, width), id="gpu")
                 yield Panel(self._fps_history, id="fps-history")
-        table: DataTable[Text] = DataTable(id="processes", cursor_type="row", zebra_stripes=False)
-        yield table
+        yield ProcessTable(id="processes")
         yield Panel(self._status_line, id="status")
         yield Input(placeholder="filter by name or pid, Enter to keep, Esc to clear", id="filter")
         yield Footer()
 
     def on_mount(self) -> None:
-        self._set_columns()
-        self.query_one("#processes", DataTable).focus()
-        self.run_worker(self._consume(), exclusive=True, exit_on_error=False)
+        table = self.query_one(ProcessTable)
+        table.set_columns(self.sort_key)
+        table.focus()
+        self.consumer = self.run_worker(self._consume(), exclusive=True, exit_on_error=False)
 
     # -- data -----------------------------------------------------------------------------------
 
@@ -141,42 +228,13 @@ class IPhoneTop(App[None]):
     def _shown_cpu(self):
         return self.shown.cpu if self.shown else None
 
-    def _selected_pid(self) -> str | None:
-        """The row the user moved the cursor to, or None while it sits on the top row.
-
-        The highlight stays on the top row until the user moves it; then it follows that process
-        through re-sorts, so a row you picked doesn't slide away under the cursor.
-        """
-        table = self.query_one("#processes", DataTable)
-        if not table.row_count or table.cursor_row <= 0:
-            return None
-        with contextlib.suppress(Exception):
-            return table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value
-        return None
-
-    def _fill_table(self, selected: str | None = None) -> None:
-        table = self.query_one("#processes", DataTable)
+    def _fill_table(self) -> None:
         if self.shown is None:
             return
-        selected = selected or self._selected_pid()
         processes = filter_processes(self.shown.processes, self.filter_text, self.apps_only)
         processes = sort_processes(processes, self.sort_key)
-        table.clear()
-        for process in processes:
-            table.add_row(*render.process_cells(process), key=str(process.pid))
-        if selected is not None:
-            with contextlib.suppress(Exception):
-                table.move_cursor(row=table.get_row_index(selected), animate=False)
-
-    def _set_columns(self) -> None:
-        table = self.query_one("#processes", DataTable)
-        selected = self._selected_pid()
-        table.clear(columns=True)
-        for label, key in COLUMNS:
-            marker = "▼" if key == self.sort_key else ""
-            table.add_column(Text(f"{label}{marker}", justify="right"), key=label)
-        table.add_column(f"NAME{'▲' if self.sort_key == 'name' else ''}", key="NAME")
-        self._fill_table(selected)
+        rows = [(str(p.pid), render.process_cells(p)) for p in processes]
+        self.query_one(ProcessTable).show(rows, alive={str(p.pid) for p in self.shown.processes})
 
     # -- text -----------------------------------------------------------------------------------
 
@@ -213,7 +271,8 @@ class IPhoneTop(App[None]):
 
     def action_cycle_sort(self) -> None:
         self.sort_key = SORT_KEYS[(SORT_KEYS.index(self.sort_key) + 1) % len(SORT_KEYS)]
-        self._set_columns()
+        self.query_one(ProcessTable).set_columns(self.sort_key)
+        self._fill_table()
         self.query_one("#status", Panel).refresh()
 
     def action_toggle_apps(self) -> None:
@@ -238,14 +297,14 @@ class IPhoneTop(App[None]):
         field.value = ""
         self._apply_filter("")
         field.remove_class("visible")
-        self.query_one("#processes", DataTable).focus()
+        self.query_one(ProcessTable).focus()
 
     def on_input_changed(self, event: Input.Changed) -> None:
         self._apply_filter(event.value)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         event.input.remove_class("visible")
-        self.query_one("#processes", DataTable).focus()
+        self.query_one(ProcessTable).focus()
 
     def _apply_filter(self, text: str) -> None:
         self.filter_text = text

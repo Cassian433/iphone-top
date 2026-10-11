@@ -107,7 +107,7 @@ async def _present(args: argparse.Namespace, events: AsyncGenerator[object, None
     from iphone_top.app import IPhoneTop
 
     app = IPhoneTop(events, transport=transport)
-    await app.run_async()
+    await app.run_until_closed()
     if app.error is not None:
         raise app.error
     return app.return_code or 0
