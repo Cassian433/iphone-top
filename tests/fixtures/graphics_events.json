@@ -1,0 +1,58 @@
+[
+ {
+  "Device Utilization %": 0,
+  "Renderer Utilization %": 0,
+  "Alloc system memory": 88997888,
+  "recoveryCount": 0,
+  "Allocated PB Size": 786432,
+  "Tiler Utilization %": 0,
+  "SplitSceneCount": 0,
+  "XRVideoCardRunTimeStamp": 452,
+  "In use system memory": 8880128,
+  "TiledSceneBytes": 430080,
+  "IOGLBundleName": "Built-In",
+  "CoreAnimationFramesPerSecond": 0
+ },
+ {
+  "Device Utilization %": 0,
+  "Renderer Utilization %": 0,
+  "Alloc system memory": 88997888,
+  "recoveryCount": 0,
+  "Allocated PB Size": 786432,
+  "Tiler Utilization %": 0,
+  "SplitSceneCount": 0,
+  "XRVideoCardRunTimeStamp": 1008635,
+  "In use system memory": 8880128,
+  "TiledSceneBytes": 0,
+  "IOGLBundleName": "Built-In",
+  "CoreAnimationFramesPerSecond": 0
+ },
+ {
+  "Device Utilization %": 0,
+  "Renderer Utilization %": 0,
+  "Alloc system memory": 88997888,
+  "recoveryCount": 0,
+  "Allocated PB Size": 786432,
+  "Tiler Utilization %": 0,
+  "SplitSceneCount": 0,
+  "XRVideoCardRunTimeStamp": 2031602,
+  "In use system memory": 8880128,
+  "TiledSceneBytes": 0,
+  "IOGLBundleName": "Built-In",
+  "CoreAnimationFramesPerSecond": 0
+ },
+ {
+  "Device Utilization %": 1,
+  "Renderer Utilization %": 1,
+  "Alloc system memory": 103481344,
+  "recoveryCount": 0,
+  "Allocated PB Size": 3538944,
+  "Tiler Utilization %": 1,
+  "SplitSceneCount": 0,
+  "XRVideoCardRunTimeStamp": 3054296,
+  "In use system memory": 12288000,
+  "TiledSceneBytes": 430080,
+  "IOGLBundleName": "Built-In",
+  "CoreAnimationFramesPerSecond": 0
+ }
+]

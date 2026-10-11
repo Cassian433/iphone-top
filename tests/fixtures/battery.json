@@ -1,0 +1,20 @@
+{
+ "lockdown": {
+  "BatteryCurrentCapacity": 97,
+  "BatteryIsCharging": false,
+  "ExternalChargeCapable": true,
+  "ExternalConnected": true,
+  "FullyCharged": false,
+  "GasGaugeCapability": true,
+  "HasBattery": true
+ },
+ "io_power_source": {
+  "CurrentCapacity": 97,
+  "MaxCapacity": 100,
+  "IsCharging": false,
+  "ExternalConnected": true,
+  "FullyCharged": false,
+  "Temperature": 2929,
+  "Voltage": 4242
+ }
+}
