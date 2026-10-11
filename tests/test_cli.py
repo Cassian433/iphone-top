@@ -42,14 +42,18 @@ def test_transport_options(monkeypatch: pytest.MonkeyPatch) -> None:
         yield
 
     monkeypatch.setattr("iphone_top.connect.connect", record)
-    monkeypatch.delenv("PYMOBILEDEVICE3_UDID", raising=False)
+    for name in ("PYMOBILEDEVICE3_UDID", "PYMOBILEDEVICE3_USBMUX", "USBMUXD_SOCKET_ADDRESS"):
+        monkeypatch.delenv(name, raising=False)
     cli.main(["--json", "--rsd", "fd00::1", "58783"])
-    assert seen == {"udid": None, "rsd": ("fd00::1", 58783), "tunnel": None}
+    assert seen == {"udid": None, "rsd": ("fd00::1", 58783), "tunnel": None, "usbmux": None}
     cli.main(["--json", "--tunnel"])
     assert seen["tunnel"] == "" and seen["rsd"] is None
     monkeypatch.setenv("PYMOBILEDEVICE3_UDID", "abc")
     cli.main(["--json", "--tunnel", "abc"])
     assert seen["tunnel"] == "abc" and seen["udid"] == "abc"
+    monkeypatch.setenv("PYMOBILEDEVICE3_USBMUX", "/tmp/mux.sock")
+    cli.main(["--json"])
+    assert seen["usbmux"] == "/tmp/mux.sock"
 
 
 def test_rejects_conflicting_transports_and_tiny_intervals(capsys: pytest.CaptureFixture[str]) -> None:

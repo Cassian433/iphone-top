@@ -61,6 +61,7 @@ async def connect(
     udid: str | None = None,
     rsd: tuple[str, int] | None = None,
     tunnel: str | None = None,
+    usbmux: str | None = None,
 ) -> AsyncIterator[Connection]:
     """Yield an open :class:`Connection`; ``tunnel`` is a UDID, or "" for the only tunneld device."""
     if rsd is not None:
@@ -80,7 +81,7 @@ async def connect(
             await service.close()
         return
 
-    lockdown = await create_using_usbmux(serial=udid or await _only_usb_device())
+    lockdown = await create_using_usbmux(serial=udid or await _only_usb_device(usbmux), usbmux_address=usbmux)
     try:
         if ios_major(lockdown.product_version) >= 17:
             # Imported lazily: it pulls in the userspace network stack, which iOS 16 never needs.
@@ -101,9 +102,9 @@ async def connect(
         await lockdown.close()
 
 
-async def _only_usb_device() -> str | None:
+async def _only_usb_device(address: str | None) -> str | None:
     """The UDID of the single USB device, None if there is none (create_using_usbmux then explains)."""
-    devices = await usbmux.select_devices_by_connection_type(connection_type="USB")
+    devices = await usbmux.select_devices_by_connection_type(connection_type="USB", usbmux_address=address)
     if len(devices) <= 1:
         return devices[0].serial if devices else None
     listing = "\n".join(f"  {device.serial}" for device in devices)
@@ -184,7 +185,7 @@ def explain(error: BaseException) -> str | None:
     if isinstance(error, NoDeviceConnectedError):
         return "No iPhone found over USB. Plug it in, unlock it, and tap Trust if asked."
     if isinstance(error, DeviceNotFoundError):
-        return f"Device not found: {error}. Check --udid / PYMOBILEDEVICE3_UDID."
+        return f"{error}. Check --udid (or PYMOBILEDEVICE3_UDID)."
     if isinstance(error, (NotPairedError, PairingDialogResponsePendingError)):
         return "The phone doesn't trust this computer yet. Unlock it, tap Trust, and run iphone-top again."
     if isinstance(error, UserDeniedPairingError):

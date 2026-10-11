@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 import time
 from collections import deque
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import ClassVar
 
 from rich.text import Text
@@ -65,7 +65,7 @@ class IPhoneTop(App[None]):
         Binding("escape", "clear_filter", "Clear filter", show=False),
     ]
 
-    def __init__(self, events: AsyncIterator[object], transport: str) -> None:
+    def __init__(self, events: AsyncGenerator[object, None], transport: str) -> None:
         super().__init__()
         self.events = events
         self.transport = transport
@@ -111,7 +111,7 @@ class IPhoneTop(App[None]):
 
     async def _consume(self) -> None:
         try:
-            async with contextlib.aclosing(self.events) as events:  # pyright: ignore[reportArgumentType]
+            async with contextlib.aclosing(self.events) as events:
                 async for event in events:
                     if isinstance(event, DeviceHeader):
                         self.header = event

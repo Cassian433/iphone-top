@@ -9,7 +9,7 @@ import json
 import logging
 import os
 import sys
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from pathlib import Path
 
 from iphone_top import __version__
@@ -32,6 +32,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--udid",
         default=os.environ.get("PYMOBILEDEVICE3_UDID"),
         help="device to watch when several are plugged in (default: $PYMOBILEDEVICE3_UDID, or the only one)",
+    )
+    parser.add_argument(
+        "--usbmux",
+        default=os.environ.get("PYMOBILEDEVICE3_USBMUX") or os.environ.get("USBMUXD_SOCKET_ADDRESS"),
+        metavar="ADDRESS",
+        help="usbmuxd socket path or HOST:PORT (default: $PYMOBILEDEVICE3_USBMUX, or the platform's usbmuxd)",
     )
     transport = parser.add_mutually_exclusive_group()
     transport.add_argument(
@@ -84,7 +90,7 @@ async def _run(args: argparse.Namespace) -> int:
         from iphone_top.sampler import LiveSampler
 
         rsd = (args.rsd[0], int(args.rsd[1])) if args.rsd else None
-        async with connect(udid=args.udid, rsd=rsd, tunnel=args.tunnel) as connection:
+        async with connect(udid=args.udid, rsd=rsd, tunnel=args.tunnel, usbmux=args.usbmux) as connection:
             sampler = LiveSampler(connection, interval_ms=args.interval, network=not args.no_net)
             return await _present(args, sampler.stream(), transport=connection.transport)
     except Exception as e:
@@ -95,7 +101,7 @@ async def _run(args: argparse.Namespace) -> int:
         return EXIT_ERROR
 
 
-async def _present(args: argparse.Namespace, events: AsyncIterator[object], transport: str) -> int:
+async def _present(args: argparse.Namespace, events: AsyncGenerator[object, None], transport: str) -> int:
     if args.json:
         return await _print_json(events, args.count)
     from iphone_top.app import IPhoneTop
@@ -107,11 +113,11 @@ async def _present(args: argparse.Namespace, events: AsyncIterator[object], tran
     return app.return_code or 0
 
 
-async def _print_json(events: AsyncIterator[object], count: int | None) -> int:
+async def _print_json(events: AsyncGenerator[object, None], count: int | None) -> int:
     from iphone_top.model import DeviceHeader, Sample, header_to_dict, sample_to_dict
 
     printed = 0
-    async with contextlib.aclosing(events) as stream:  # pyright: ignore[reportArgumentType]
+    async with contextlib.aclosing(events) as stream:
         async for event in stream:
             if isinstance(event, DeviceHeader):
                 line = header_to_dict(event)
