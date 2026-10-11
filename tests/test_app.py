@@ -175,8 +175,7 @@ async def test_quitting_waits_for_the_stream_to_close() -> None:
     app = IPhoneTop(slow_to_close(), transport="test")
 
     async def quit_once_running() -> None:
-        while app.header is None:
-            await asyncio.sleep(0.01)
+        await wait_for(app, lambda: app.header is not None)
         app.exit()
 
     quitter = asyncio.create_task(quit_once_running())
