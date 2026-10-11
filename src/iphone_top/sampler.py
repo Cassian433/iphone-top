@@ -63,6 +63,7 @@ class LiveSampler:
         self._net = NetworkRates()
         self._pids: set[int] = set()
         self._names: dict[int, tuple[str, bool]] = {}
+        self._unlisted: set[int] = set()
         self._names_stale = False
 
     async def stream(self) -> AsyncIterator[Event]:
@@ -165,7 +166,9 @@ class LiveSampler:
             pids.add(process.pid)
             known = self._names.get(process.pid)
             if known is None:
-                self._names_stale = True
+                # DTServiceHub never shows up in the process list, so only ask about a pid once.
+                if process.pid not in self._unlisted:
+                    self._names_stale = True
             else:
                 full_name, is_app = known
                 # sysmontap truncates names at 31 characters; the process list has them in full.
@@ -191,6 +194,8 @@ class LiveSampler:
                     self._remember_names(await info.proclist())
                 except Exception:
                     logger.debug("process list refresh failed", exc_info=True)
+                else:
+                    self._unlisted = self._pids.difference(self._names)
 
     async def _graphics_loop(self, dvt: DvtProvider) -> None:
         try:
