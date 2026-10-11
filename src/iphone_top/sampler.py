@@ -15,6 +15,7 @@ from collections.abc import AsyncGenerator, Sequence
 from pathlib import Path
 from typing import Any
 
+from pymobiledevice3.exceptions import ConnectionTerminatedError
 from pymobiledevice3.services.diagnostics import DiagnosticsService
 from pymobiledevice3.services.dvt.instruments.device_info import DeviceInfo
 from pymobiledevice3.services.dvt.instruments.dvt_provider import DvtProvider
@@ -49,6 +50,10 @@ logger = logging.getLogger(__name__)
 BATTERY_POLL_SECONDS = 30
 NAMES_REFRESH_SECONDS = 5
 STOP_TIMEOUT_SECONDS = 2
+# The network provider answers as fast as it is polled; more than twice a second is wasted traffic.
+NETWORK_MIN_INTERVAL_MS = 500
+# sysmontap sends heartbeats between samples, so this much silence means the transport is stuck.
+STALL_SECONDS = 10
 
 
 class LiveSampler:
@@ -64,8 +69,8 @@ class LiveSampler:
         self._net = NetworkRates()
         self._pids: set[int] = set()
         self._names: dict[int, tuple[str, bool]] = {}
+        self._unknown: set[int] = set()
         self._unlisted: set[int] = set()
-        self._names_stale = False
 
     async def stream(self) -> AsyncGenerator[Event, None]:
         async with contextlib.AsyncExitStack() as stack:
@@ -128,8 +133,15 @@ class LiveSampler:
         system_rows = process_rows = 0
         cpu = memory = None
         current: dict[str, float | None] = dict.fromkeys(rates)
-        async with sysmon:
-            async for row in sysmon:
+        stall = max(STALL_SECONDS, 10 * self.interval_ms / 1000)
+        async with sysmon, contextlib.aclosing(sysmon.__aiter__()) as rows:
+            while True:
+                try:
+                    row = await asyncio.wait_for(rows.__anext__(), stall)
+                except StopAsyncIteration:
+                    break
+                except asyncio.TimeoutError:
+                    raise ConnectionTerminatedError(f"no data from the phone for {stall:.0f} seconds") from None
                 if not isinstance(row, dict):
                     continue  # heartbeats
                 process_attributes = row.get("ProcessesAttributes", process_attributes)
@@ -161,7 +173,7 @@ class LiveSampler:
                         battery=self._battery,
                         processes=processes,
                     )
-        raise ConnectionError("sysmontap stream ended")
+        raise ConnectionTerminatedError("sysmontap stream ended")
 
     def _enrich(self, processes: list[Any]) -> None:
         pids = set()
@@ -171,7 +183,7 @@ class LiveSampler:
             if known is None:
                 # DTServiceHub never shows up in the process list, so only ask about a pid once.
                 if process.pid not in self._unlisted:
-                    self._names_stale = True
+                    self._unknown.add(process.pid)
             else:
                 full_name, is_app = known
                 # sysmontap truncates names at 31 characters; the process list has them in full.
@@ -191,14 +203,23 @@ class LiveSampler:
     async def _names_loop(self, info: DeviceInfo) -> None:
         while True:
             await asyncio.sleep(NAMES_REFRESH_SECONDS)
-            if self._names_stale:
-                self._names_stale = False
-                try:
-                    self._remember_names(await info.proclist())
-                except Exception:
-                    logger.debug("process list refresh failed", exc_info=True)
-                else:
-                    self._unlisted = self._pids.difference(self._names)
+            # Short-lived processes come and go between refreshes; asking about those is wasted.
+            self._unknown.intersection_update(self._pids)
+            if self._unknown:
+                await self._refresh_names(info)
+
+    async def _refresh_names(self, info: DeviceInfo) -> None:
+        # Only the pids unknown before the request can be judged by its answer; one that appears
+        # while it is in flight waits for the next refresh.
+        asked = set(self._unknown)
+        try:
+            processes = await info.proclist()
+        except Exception:
+            logger.debug("process list refresh failed", exc_info=True)
+            return
+        self._remember_names(processes)
+        self._unknown.difference_update(asked)
+        self._unlisted.update(pid for pid in asked if pid not in self._names)
 
     async def _graphics_loop(self, dvt: DvtProvider) -> None:
         try:
@@ -219,31 +240,40 @@ class LiveSampler:
             self._fps = self._gpu = None
 
     async def _network_loop(self, dvt: DvtProvider) -> None:
-        interval = max(self.interval_ms, 500) / 1000
+        # Driven through the service rather than `async with NetworkStatistics`, whose exit waits for
+        # the stop reply without a time limit; and the pid list changes as processes come and go.
+        interval = max(self.interval_ms, NETWORK_MIN_INTERVAL_MS) / 1000
         tracked = sorted(self._pids)
+        network = NetworkStatistics(dvt, tracked)
+        started = False
         try:
-            async with NetworkStatistics(dvt, tracked) as network:
-                try:
-                    while True:
-                        await asyncio.sleep(interval)
-                        current = set(self._pids)
-                        new = sorted(current.difference(tracked))
-                        gone = sorted(set(tracked).difference(current))
-                        if new:
-                            await network.service.start_sampling_for_pids_(new)
-                        if gone:
-                            await network.service.stop_sampling_for_pids_(gone)
-                        tracked = sorted(current)
-                        sample = await network.service.sample_attributes_for_pids_({}, tracked)
-                        if sample:
-                            self._net.update(sample, time.time())
-                finally:
-                    with contextlib.suppress(Exception):
-                        await asyncio.wait_for(network.service.stop_sampling_for_pids_(tracked), STOP_TIMEOUT_SECONDS)
+            await network.connect()
+            await network.service.start_sampling_for_pids_(tracked)
+            started = True
+            # Each reply carries the sample taken at the previous call; the first is a leftover.
+            await network.service.sample_attributes_for_pids_({}, tracked)
+            while True:
+                await asyncio.sleep(interval)
+                current = set(self._pids)
+                new = sorted(current.difference(tracked))
+                gone = sorted(set(tracked).difference(current))
+                if new:
+                    await network.service.start_sampling_for_pids_(new)
+                if gone:
+                    await network.service.stop_sampling_for_pids_(gone)
+                tracked = sorted(current)
+                sample = await network.service.sample_attributes_for_pids_({}, tracked)
+                if sample:
+                    self._net.update(sample, time.time())
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.debug("network statistics failed", exc_info=True)
+            self._net = NetworkRates()  # stale rates would keep showing as if they were live
+        finally:
+            if started:
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(network.service.stop_sampling_for_pids_(tracked), STOP_TIMEOUT_SECONDS)
 
     async def _battery_loop(self) -> None:
         while True:

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
+from pymobiledevice3.exceptions import ConnectionTerminatedError
 
 from iphone_top.connect import Connection
 from iphone_top.model import DeviceHeader, Sample
@@ -42,7 +43,7 @@ def make_sampler(device_info: dict[str, Any] | None = None) -> LiveSampler:
 async def collect(sampler: LiveSampler, recorded: dict[str, Any]) -> list[Sample]:
     numer, denom = recorded["mach_time_info"][1:3]
     samples: list[Sample] = []
-    with pytest.raises(ConnectionError):
+    with pytest.raises(ConnectionTerminatedError):
         async for sample in sampler._sysmon_samples(FakeSysmontap(recorded), numer / denom / 1e9):  # type: ignore[arg-type]
             samples.append(sample)
     return samples
@@ -89,19 +90,49 @@ async def test_full_names_and_app_flags_come_from_the_process_list(
     assert apps and all(listed[p.pid]["isApplication"] for p in apps)
 
 
-async def test_unlisted_pids_only_trigger_one_name_refresh(
-    sysmontap: dict[str, Any], device_info: dict[str, Any]
-) -> None:
+class FakeDeviceInfo:
+    def __init__(self, proclist: list[dict[str, Any]], during: Any = None) -> None:
+        self.proclist_result = proclist
+        self.during = during
+        self.calls = 0
+
+    async def proclist(self) -> list[dict[str, Any]]:
+        self.calls += 1
+        if self.during is not None:
+            self.during()
+        return self.proclist_result
+
+
+async def test_unlisted_pids_are_asked_about_once(sysmontap: dict[str, Any], device_info: dict[str, Any]) -> None:
     recorded = {**sysmontap, "mach_time_info": device_info["mach_time_info"]}
     sampler = make_sampler(device_info)
     await collect(sampler, recorded)
     # DTServiceHub is in the sysmontap rows but never in runningProcesses.
-    assert sampler._names_stale
-    sampler._names_stale = False
-    sampler._unlisted = sampler._pids.difference(sampler._names)
-    assert sampler._unlisted
+    hub = {p.pid for p in parse_hub(recorded)}
+    assert hub and hub <= sampler._unknown
+    info = FakeDeviceInfo(device_info["proclist"])
+    await sampler._refresh_names(info)  # type: ignore[arg-type]
+    assert info.calls == 1
+    assert hub <= sampler._unlisted
+    assert not sampler._unknown
     await collect(sampler, recorded)
-    assert not sampler._names_stale
+    assert not sampler._unknown  # nothing left to ask about, so the names loop stays quiet
+
+
+async def test_a_pid_that_appears_during_a_refresh_is_not_written_off(device_info: dict[str, Any]) -> None:
+    sampler = make_sampler(device_info)
+    sampler._unknown = {999_001}
+    info = FakeDeviceInfo(device_info["proclist"], during=lambda: sampler._unknown.add(999_002))
+    await sampler._refresh_names(info)  # type: ignore[arg-type]
+    assert sampler._unlisted == {999_001}
+    assert sampler._unknown == {999_002}
+
+
+def parse_hub(recorded: dict[str, Any]) -> list[Any]:
+    from iphone_top.model import parse_processes
+
+    rows = [row for row in recorded["rows"] if "Processes" in row]
+    return [p for p in parse_processes(rows[-1], recorded["process_attributes"]) if p.name == "DTServiceHub"]
 
 
 async def test_network_rates_are_attached(sysmontap: dict[str, Any], device_info: dict[str, Any]) -> None:
