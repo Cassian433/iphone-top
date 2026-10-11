@@ -141,14 +141,24 @@ class IPhoneTop(App[None]):
     def _shown_cpu(self):
         return self.shown.cpu if self.shown else None
 
-    def _fill_table(self) -> None:
+    def _selected_pid(self) -> str | None:
+        """The row the user moved the cursor to, or None while it sits on the top row.
+
+        The highlight stays on the top row until the user moves it; then it follows that process
+        through re-sorts, so a row you picked doesn't slide away under the cursor.
+        """
+        table = self.query_one("#processes", DataTable)
+        if not table.row_count or table.cursor_row <= 0:
+            return None
+        with contextlib.suppress(Exception):
+            return table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value
+        return None
+
+    def _fill_table(self, selected: str | None = None) -> None:
         table = self.query_one("#processes", DataTable)
         if self.shown is None:
             return
-        selected = None
-        if table.row_count and table.cursor_row >= 0:
-            with contextlib.suppress(Exception):
-                selected = table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value
+        selected = selected or self._selected_pid()
         processes = filter_processes(self.shown.processes, self.filter_text, self.apps_only)
         processes = sort_processes(processes, self.sort_key)
         table.clear()
@@ -160,12 +170,13 @@ class IPhoneTop(App[None]):
 
     def _set_columns(self) -> None:
         table = self.query_one("#processes", DataTable)
+        selected = self._selected_pid()
         table.clear(columns=True)
         for label, key in COLUMNS:
             marker = "▼" if key == self.sort_key else ""
             table.add_column(Text(f"{label}{marker}", justify="right"), key=label)
         table.add_column(f"NAME{'▲' if self.sort_key == 'name' else ''}", key="NAME")
-        self._fill_table()
+        self._fill_table(selected)
 
     # -- text -----------------------------------------------------------------------------------
 

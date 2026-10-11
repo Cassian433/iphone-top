@@ -79,3 +79,17 @@ async def test_errors_from_the_stream_end_the_app(recording_path: Path) -> None:
         await wait_for(app, lambda: app.error is not None)
     assert isinstance(app.error, ConnectionResetError)
     assert app.return_code == 1
+
+
+async def test_cursor_stays_on_top_until_moved_then_follows_the_process(recording_path: Path) -> None:
+    app = IPhoneTop(replay_stream(recording_path, speed=1000), transport="replay")
+    async with app.run_test(size=(120, 40)) as pilot:
+        await wait_for(app, lambda: app.finished)
+        table = app.query_one("#processes", DataTable)
+        await pilot.press("s")
+        assert table.cursor_row == 0
+
+        await pilot.press("down", "down")
+        picked = table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value
+        await pilot.press("s")  # re-sort by RX: the picked process moves, the cursor goes with it
+        assert table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value == picked
