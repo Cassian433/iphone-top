@@ -10,7 +10,8 @@ from typing import Any
 from textual.coordinate import Coordinate
 from textual.widgets import DataTable
 
-from iphone_top.app import IPhoneTop, ProcessTable
+from iphone_top import render
+from iphone_top.app import COLUMNS, IPhoneTop, ProcessTable
 from iphone_top.model import DeviceHeader, ProcessStats, Sample
 from iphone_top.sampler import replay_stream
 
@@ -182,3 +183,31 @@ async def test_quitting_waits_for_the_stream_to_close() -> None:
     await asyncio.wait_for(app.run_until_closed(headless=True), 10)
     await quitter
     assert closed, "run_until_closed returned before the stream finished closing"
+
+
+def test_column_widths_fit_the_longest_values() -> None:
+    # The numeric columns have fixed widths, so a value wider than its column would be cut off.
+    widest = ProcessStats(
+        pid=99999, name="x", cpu=1000.0, memory=1023 * 1024**2, threads=9999, rx_rate=1023 * 1024, tx_rate=1023 * 1024
+    )
+    for (label, _, width), cell in zip(COLUMNS, render.process_cells(widest), strict=False):
+        assert cell.cell_len <= width, label
+
+
+async def test_only_the_name_column_sizes_itself() -> None:
+    queue: asyncio.Queue[Any] = asyncio.Queue()
+    app = IPhoneTop(queued(queue), transport="test")
+    async with app.run_test(size=(100, 30)):
+        table = app.query_one(ProcessTable)
+        await show(app, queue, Sample(time=1, processes=[process(1, 50), process(2, 40)]))
+        sizing = {key.value: column.auto_width for key, column in table.columns.items()}
+        assert sizing == {
+            "PID": False,
+            "CPU%": False,
+            "MEM": False,
+            "THR": False,
+            "RX/s": False,
+            "TX/s": False,
+            "NAME": True,
+        }
+        await queue.put(None)

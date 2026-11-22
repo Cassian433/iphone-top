@@ -22,8 +22,18 @@ from iphone_top import render
 from iphone_top.model import SORT_KEYS, DeviceHeader, Sample, filter_processes, sort_processes
 
 HISTORY = 120
-# (column key, sort key it shows a marker for)
-COLUMNS = (("PID", "pid"), ("CPU%", "cpu"), ("MEM", "memory"), ("THR", None), ("RX/s", "rx"), ("TX/s", "tx"))
+# (column key, sort key it shows a marker for, width). The widths fit the longest value each
+# formatter produces ("99999", "1000.0", "1023M", "9999", "1023K/s"). They are fixed because a
+# self-sizing column makes the table re-measure every cell in it for each cell that changed:
+# with 400 processes that was about 75,000 measurements a sample.
+COLUMNS = (
+    ("PID", "pid", 5),
+    ("CPU%", "cpu", 6),
+    ("MEM", "memory", 5),
+    ("THR", None, 4),
+    ("RX/s", "rx", 7),
+    ("TX/s", "tx", 7),
+)
 SORT_LABELS = {"cpu": "CPU", "memory": "memory", "rx": "RX", "tx": "TX", "pid": "PID", "name": "name"}
 CLOSE_TIMEOUT_SECONDS = 10
 
@@ -57,12 +67,12 @@ class ProcessTable(DataTable[Text]):
 
     def set_columns(self, sort_key: str) -> None:
         if not self.columns:
-            # Widths are measured from the first label, so it already holds the marker slot.
-            for label, _ in COLUMNS:
-                self.add_column(Text(f"{label} ", justify="right"), key=label)
+            for label, _, width in COLUMNS:
+                self.add_column(Text(f"{label} ", justify="right"), width=width, key=label)
+            # The name column sizes itself: names vary, and they rarely change once shown.
             self.add_column("NAME ", key="NAME")
         # The marker slot is always there, so the columns don't shift when the sort changes.
-        for label, key in COLUMNS:
+        for label, key, _ in COLUMNS:
             self.columns[self._column_key(label)].label = Text(
                 f"{label}{'▼' if key == sort_key else ' '}", justify="right"
             )
@@ -90,6 +100,7 @@ class ProcessTable(DataTable[Text]):
                 self.remove_row(key)
                 del self._cells[key]
             column_keys = list(self.columns)
+            name_column = column_keys[-1]
             for key, cells in rows:
                 before = self._cells.get(key)
                 if before is None:
@@ -97,7 +108,7 @@ class ProcessTable(DataTable[Text]):
                 elif before != cells:
                     for column, old, new in zip(column_keys, before, cells, strict=True):
                         if old != new:
-                            self.update_cell(key, column, new, update_width=True)
+                            self.update_cell(key, column, new, update_width=column is name_column)
                 self._cells[key] = cells
             rank = {key: index for index, (key, _) in enumerate(rows)}
             self.sort(self._column_key("PID"), key=lambda pid: rank[pid.plain])
