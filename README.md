@@ -9,11 +9,11 @@ htop for an iPhone plugged into your computer. Live CPU, memory, FPS, GPU and pe
 ## Install
 
 ```sh
-uvx iphone-top            # run it without installing
-pipx install iphone-top   # or keep it around
+uvx --from git+https://github.com/Cassian433/iphone-top iphone-top   # run it without installing
+pipx install git+https://github.com/Cassian433/iphone-top            # or keep it around
 ```
 
-Python 3.10 or newer. It installs [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) and [Textual](https://github.com/Textualize/textual).
+It isn't on PyPI yet, so this installs from the repository. Python 3.10 or newer. It installs [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) and [Textual](https://github.com/Textualize/textual).
 
 ## Use
 
